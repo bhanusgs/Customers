@@ -1,10 +1,8 @@
-import os
-import time
-import csv
 import pandas as pd
-from faker import Faker
-from dotenv import load_dotenv
 import psycopg2
+from faker import Faker
+import csv
+import time
 
 # Load environment variables
 load_dotenv()
@@ -16,62 +14,89 @@ DB_NAME = os.getenv("DB_NAME")
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 
+# Configurations
+CSV_FILE = "customers.csv"
+DB_CONFIG = {
+    "host": "DB_HOST",
+    "dbname": "DB_NAME",
+    "user": "DB_USER",
+    "password": "DB_PASSWORD",
+    "port": DB_PORT
+}
 TOTAL_RECORDS = 500_000
 CHUNK_SIZE = 100_000  # Write CSV in batches
 
-# Step 1: Generate 500,000 fake customer records
-def generate_csv(Customers, num_records=500_000):
+# Define the columns
+COLUMNS = [
+    "customer_id", "first_name", "last_name", "email", "phone",
+    "address", "city", "state", "zip"
+]
+
+# Step 1: Generate CSV
+def generate_customer_csv(filename=CSV_FILE, total=TOTAL_RECORDS):
     fake = Faker()
-    with open(Customers, mode='w', newline='') as file:
-        writer = csv.writer(file)
-        writer.writerow(['id', 'name', 'email', 'address', 'created_at'])
-        for i in range(1, num_records + 1):
-            writer.writerow([
-                i,
-                fake.name(),
-                fake.email(),
-                fake.address().replace('\n', ', '),
-                fake.date_time_this_decade()
-            ])
+    print(f"📄 Generating {total} customer records in '{filename}'...")
+    
+    with open(filename, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+        writer.writerow(COLUMNS)  # Write header
+        
+        for _ in range(total // CHUNK_SIZE):
+            rows = [
+                [
+                    fake.uuid4(),
+                    fake.first_name(),
+                    fake.last_name(),
+                    fake.email(),
+                    fake.phone_number(),
+                    fake.street_address().replace("\n", " ").replace(",", ""),
+                    fake.city(),
+                    fake.state_abbr(),
+                    fake.zipcode()
+                ]
+                for _ in range(CHUNK_SIZE)
+            ]
+            writer.writerows(rows)
+    print("✅ CSV generation complete.")
 
-# Step 2: Load CSV into PostgreSQL using COPY for performance
-def load_csv_to_db(customers):
-    start_time = time.time()
-    conn = psycopg2.connect(
-        host=DB_HOST,
-        port=DB_PORT,
-        dbname=DB_NAME,
-        user=DB_USER,
-        password=DB_PASSWORD
-    )
-    cursor = conn.cursor()
+# Step 2: Load CSV into PostgreSQL using COPY
+def load_csv_to_postgres(csv_file=CSV_FILE):
+    print(f"🛢️  Connecting to PostgreSQL...")
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
 
-    # Create table if not exists
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS customers (
-            id INTEGER PRIMARY KEY,
-            name TEXT,
+    print("🧹 Dropping and creating table 'customers'...")
+    cur.execute("DROP TABLE IF EXISTS customers")
+    cur.execute("""
+        CREATE TABLE customers (
+            customer_id TEXT,
+            first_name TEXT,
+            last_name TEXT,
             email TEXT,
+            phone TEXT,
             address TEXT,
-            created_at TIMESTAMP
-        );
+            city TEXT,
+            state TEXT,
+            zip TEXT
+        )
     """)
     conn.commit()
 
-    # Use COPY for fast import
-    with open(customers, 'r') as f:
-        next(f)  # Skip header
-        cursor.copy_expert("COPY customers FROM STDIN WITH CSV", f)
-    conn.commit()
-    cursor.close()
-    conn.close()
-    end_time = time.time()
-    print(f"CSV loaded in {end_time - start_time:.2f} seconds.")
+    print(f"⬆️  Loading data from '{csv_file}' into PostgreSQL...")
+    start_time = time.time()
 
+    with open(csv_file, "r", encoding="utf-8") as f:
+        cur.copy_expert("COPY customers FROM STDIN WITH CSV HEADER", f)
+
+    conn.commit()
+    end_time = time.time()
+    print(f"✅ Load complete in {end_time - start_time:.2f} seconds.")
+
+    cur.close()
+    conn.close()
+
+# Run the ETL process
 if __name__ == "__main__":
-    filename = "customers.csv"
-    print("Generating CSV file...")
-    generate_csv(filename)
-    print("CSV file generated.")
-    print("Loading CSV into database...")
-    load_csv_to_db(filename)
+    generate_customer_csv()
+    load_csv_to_postgres()
+
