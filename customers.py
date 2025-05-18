@@ -16,6 +16,9 @@ DB_NAME = os.getenv("DB_NAME")
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 
+TOTAL_RECORDS = 500_000
+CHUNK_SIZE = 100_000  # Write CSV in batches
+
 # Step 1: Generate 500,000 fake customer records
 def generate_csv(Customers, num_records=500_000):
     fake = Faker()
